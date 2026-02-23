@@ -589,9 +589,11 @@
   }
 
   function startBookmarkLoop(bookmark) {
-    const startTime = bookmark.time;
+    const originalStart = bookmark.time;
+    const leadIn = 1.0;
+    const startTime = Math.max(0, originalStart - leadIn);
     const duration = bookmark.duration || 3;
-    const endTime = startTime + duration;
+    const endTime = originalStart + duration;
 
     loopA = startTime;
     loopB = endTime;
