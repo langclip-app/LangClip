@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LangClip — YouTube言語学習</title>
+  <meta name="description" content="YouTube動画の気になる瞬間をブックマークして、言語学習に活用するアプリ">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header__brand">
+        <div class="header__logo">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <defs>
+              <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
+                <stop offset="0%" stop-color="#a78bfa" />
+                <stop offset="100%" stop-color="#06b6d4" />
+              </linearGradient>
+            </defs>
+            <rect width="32" height="32" rx="8" fill="url(#logoGrad)" />
+            <path d="M12 10L23 16L12 22V10Z" fill="white" />
+            <circle cx="22" cy="22" r="5" fill="white" opacity="0.9" />
+            <path d="M20 22H24M22 20V24" stroke="url(#logoGrad)" stroke-width="1.5" stroke-linecap="round" />
+          </svg>
+        </div>
+        <h1 class="header__title">LangClip</h1>
+        <span class="header__tagline">YouTube × 言語学習</span>
+      </div>
+      <div class="user-area" id="userArea">
+        <button id="googleLoginBtn" class="btn-google">
+          <svg width="18" height="18" viewBox="0 0 18 18">
+            <path
+              d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+              fill="#4285F4" />
+            <path
+              d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"
+              fill="#34A853" />
+            <path
+              d="M3.964 10.707A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.039l3.007-2.332z"
+              fill="#FBBC05" />
+            <path
+              d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z"
+              fill="#EA4335" />
+          </svg>
+          <span>ログイン</span>
+        </button>
+        <div id="userInfo" class="user-info" style="display:none;">
+          <img id="userAvatar" class="user-avatar" src="" alt="" referrerpolicy="no-referrer">
+          <span id="userName" class="user-name"></span>
+          <button id="logoutBtn" class="btn-logout" title="ログアウト">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M6 2H3C2.448 2 2 2.448 2 3V13C2 13.552 2.448 14 3 14H6M11 11L14 8M14 8L11 5M14 8H6"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Video Input -->
+      <section class="video-input">
+        <div class="video-input__field">
+          <div class="video-input__icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path
+                d="M3 5C3 3.895 3.895 3 5 3H15C16.105 3 17 3.895 17 5V15C17 16.105 16.105 17 15 17H5C3.895 17 3 16.105 3 15V5Z"
+                stroke="currentColor" stroke-width="1.5" />
+              <path d="M8 7.5L13 10L8 12.5V7.5Z" fill="currentColor" />
+            </svg>
+          </div>
+          <input type="text" id="videoUrlInput" class="video-input__input" placeholder="YouTube URLを貼り付け..."
+            autocomplete="off">
+          <button id="loadVideoBtn" class="video-input__btn">
+            <span>読み込む</span>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8H13M13 8L9 4M13 8L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- Player Area -->
+      <section class="player-section" id="playerSection" style="display:none;">
+        <div class="player-wrapper">
+          <div class="player-container" id="playerContainer">
+            <div id="youtubePlayer"></div>
+          </div>
+        </div>
+        <div class="player-controls">
+          <button id="addBookmarkBtn" class="btn-bookmark">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path
+                d="M10 3L12.09 7.26L16.82 7.94L13.41 11.27L14.18 15.97L10 13.77L5.82 15.97L6.59 11.27L3.18 7.94L7.91 7.26L10 3Z"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>ブックマーク</span>
+          </button>
+          <button id="loopBtn" class="btn-loop" title="A-Bループ再生">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M2.5 9A6.5 6.5 0 0115.36 5.5M15.5 9A6.5 6.5 0 012.64 12.5" stroke="currentColor"
+                stroke-width="1.5" stroke-linecap="round" />
+              <path d="M13 3.5L15.5 5.5L13 7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                stroke-linejoin="round" />
+              <path d="M5 10.5L2.5 12.5L5 14.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                stroke-linejoin="round" />
+            </svg>
+            <span>ループ</span>
+          </button>
+          <div id="loopIndicator" class="loop-indicator" style="display:none;">
+            <span id="loopRange"></span>
+            <button id="loopClear" class="loop-clear" title="ループ解除">×</button>
+          </div>
+          <span class="player-controls__time" id="currentTime">0:00</span>
+        </div>
+      </section>
+
+      <!-- Subtitle Panel -->
+      <section class="subtitle-panel" id="subtitlePanel" style="display:none;">
+        <button class="subtitle-panel__toggle" id="subtitleToggle">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5" />
+            <path d="M4 8H7M4 10.5H10M9 8H12" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+          </svg>
+          <span>字幕テキスト</span>
+          <svg class="subtitle-panel__chevron" width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M4 5.5L7 8.5L10 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+              stroke-linejoin="round" />
+          </svg>
+        </button>
+        <div class="subtitle-panel__body" id="subtitleBody">
+          <div class="subtitle-loading" id="subtitleLoading" style="display:none;">
+            <div class="spinner"></div>
+            <p>字幕を読み込み中...</p>
+          </div>
+          <div class="subtitle-empty" id="subtitleEmpty" style="display:none;">
+            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" opacity="0.4">
+              <rect x="2" y="7" width="28" height="18" rx="3" stroke="currentColor" stroke-width="1.5" />
+              <path d="M8 16H14M8 20H20" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+            </svg>
+            <p>この動画の字幕は取得できませんでした</p>
+          </div>
+          <div class="subtitle-list" id="subtitleList"></div>
+        </div>
+      </section>
+
+      <!-- Bookmarks -->
+      <section class="bookmarks-section" id="bookmarksSection" style="display:none;">
+        <div class="section-header">
+          <h2 class="section-title">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path
+                d="M4.5 2.25H13.5C14.328 2.25 15 2.922 15 3.75V15.75L9 12.75L3 15.75V3.75C3 2.922 3.672 2.25 4.5 2.25Z"
+                stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            ブックマーク
+          </h2>
+          <span class="bookmark-count" id="bookmarkCount">0</span>
+        </div>
+        <div class="bookmarks-list" id="bookmarksList"></div>
+        <div class="bookmarks-empty" id="bookmarksEmpty">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" opacity="0.4">
+            <path d="M12 6H36C38.209 6 40 7.791 40 10V42L24 34L8 42V10C8 7.791 9.791 6 12 6Z" stroke="currentColor"
+              stroke-width="2" />
+          </svg>
+          <p>動画を再生中に気になるところを<br>ブックマークしよう</p>
+        </div>
+      </section>
+
+      <!-- Library -->
+      <section class="library-section" id="librarySection">
+        <div class="section-header">
+          <h2 class="section-title">
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <rect x="2.25" y="3.75" width="5.25" height="4.5" rx="0.75" stroke="currentColor" stroke-width="1.5" />
+              <rect x="10.5" y="3.75" width="5.25" height="4.5" rx="0.75" stroke="currentColor" stroke-width="1.5" />
+              <rect x="2.25" y="10.5" width="5.25" height="4.5" rx="0.75" stroke="currentColor" stroke-width="1.5" />
+              <rect x="10.5" y="10.5" width="5.25" height="4.5" rx="0.75" stroke="currentColor" stroke-width="1.5" />
+            </svg>
+            ライブラリ
+          </h2>
+        </div>
+        <div class="library-list" id="libraryList"></div>
+        <div class="library-empty" id="libraryEmpty">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" opacity="0.4">
+            <rect x="6" y="10" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
+            <rect x="26" y="10" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
+            <rect x="6" y="26" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
+            <rect x="26" y="26" width="16" height="12" rx="2" stroke="currentColor" stroke-width="2" />
+          </svg>
+          <p>YouTube URLを入力して<br>最初の動画を追加しよう</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bookmark Modal -->
+    <div class="modal-overlay" id="bookmarkModal">
+      <div class="modal">
+        <div class="modal__header">
+          <h3 class="modal__title">ブックマークを追加</h3>
+          <button class="modal__close" id="modalClose">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M5 5L15 15M15 5L5 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal__body">
+          <div class="modal__time">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5" />
+              <path d="M8 4.5V8L10.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            <span id="modalTime">0:00</span>
+          </div>
+          <textarea id="bookmarkNote" class="modal__textarea" placeholder="メモを入力（例：この表現を覚えたい）" rows="3"></textarea>
+        </div>
+        <div class="modal__footer">
+          <button class="btn btn--secondary" id="modalCancel">キャンセル</button>
+          <button class="btn btn--primary" id="modalSave">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="editModal">
+      <div class="modal">
+        <div class="modal__header">
+          <h3 class="modal__title">ブックマークを編集</h3>
+          <button class="modal__close" id="editModalClose">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+              <path d="M5 5L15 15M15 5L5 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal__body">
+          <div class="modal__time">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5" />
+              <path d="M8 4.5V8L10.5 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+            <span id="editModalTime">0:00</span>
+          </div>
+          <textarea id="editBookmarkNote" class="modal__textarea" placeholder="メモを入力" rows="3"></textarea>
+        </div>
+        <div class="modal__footer">
+          <button class="btn btn--secondary" id="editModalCancel">キャンセル</button>
+          <button class="btn btn--primary" id="editModalSave">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>
