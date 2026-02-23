@@ -1033,6 +1033,7 @@ body::before {
 
 .subtitle-list {
   padding: 4px 0;
+  overscroll-behavior: contain;
 }
 
 .subtitle-line {

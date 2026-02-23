@@ -532,7 +532,7 @@
       const isActive = i === activeIndex;
       line.classList.toggle('subtitle-line--active', isActive);
       if (isActive && !subtitlePanel.classList.contains('subtitle-panel--collapsed')) {
-        line.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
     });
   }

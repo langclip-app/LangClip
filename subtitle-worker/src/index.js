@@ -123,32 +123,59 @@ export default {
 };
 
 function parseSubtitles(xml) {
-    const subs = [];
+    const fragments = [];
 
     // Format 1: <text start="0.0" dur="2.0">content</text>
     const textRegex = /<text\s+start="([^"]+)"\s+dur="([^"]*)"[^>]*>([\s\S]*?)<\/text>/gi;
     let match;
     while ((match = textRegex.exec(xml)) !== null) {
-        subs.push({
+        fragments.push({
             start: parseFloat(match[1]),
             duration: parseFloat(match[2] || '2'),
             text: decodeEntities(match[3]).replace(/\n/g, ' ').trim(),
         });
     }
 
-    if (subs.length > 0) return subs;
-
     // Format 2: <p t="10620" d="3000">content</p> (milliseconds)
-    const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/gi;
-    while ((match = pRegex.exec(xml)) !== null) {
-        subs.push({
-            start: parseInt(match[1]) / 1000,
-            duration: parseInt(match[2]) / 1000,
-            text: decodeEntities(match[3]).replace(/\n/g, ' ').trim(),
-        });
+    if (fragments.length === 0) {
+        const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/gi;
+        while ((match = pRegex.exec(xml)) !== null) {
+            fragments.push({
+                start: parseInt(match[1]) / 1000,
+                duration: parseInt(match[2]) / 1000,
+                text: decodeEntities(match[3]).replace(/\n/g, ' ').trim(),
+            });
+        }
     }
 
-    return subs;
+    if (fragments.length === 0) return [];
+
+    // Group fragments into sentences
+    const sentences = [];
+    let current = null;
+
+    for (const frag of fragments) {
+        if (!current) {
+            current = { ...frag };
+        } else {
+            current.text += ' ' + frag.text;
+            current.duration = (frag.start + frag.duration) - current.start;
+        }
+
+        // Check if the current text ends a sentence
+        // Punctuation: . ! ? 。 ！ ？
+        if (/[.!?。！？]$/.test(frag.text.trim())) {
+            sentences.push(current);
+            current = null;
+        }
+    }
+
+    // Push the last one if it didn't end with punctuation
+    if (current) {
+        sentences.push(current);
+    }
+
+    return sentences;
 }
 
 function decodeEntities(text) {
