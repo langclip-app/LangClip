@@ -423,18 +423,98 @@
     return ta.value;
   }
 
-  async function fetchSubtitles(videoId) {
-    if (subtitleCache[videoId]) return subtitleCache[videoId];
+  // Pick best caption track (prefer ja > en > first available)
+  function pickTrack(tracks) {
+    if (!tracks || tracks.length === 0) return null;
+    return tracks.find(t => t.languageCode === 'ja')
+      || tracks.find(t => t.languageCode === 'en')
+      || tracks[0];
+  }
 
-    const proxies = [
-      (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-      (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-    ];
+  // Parse subtitle XML into array
+  function parseSubtitleXml(xml) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xml, 'text/xml');
+    const texts = doc.querySelectorAll('text');
+    if (!texts || texts.length === 0) return null;
+    return Array.from(texts).map(t => ({
+      start: parseFloat(t.getAttribute('start')),
+      duration: parseFloat(t.getAttribute('dur') || '2'),
+      text: decodeHtmlEntities(t.textContent)
+    }));
+  }
 
-    for (const makeProxy of proxies) {
+  // CORS proxy list — ordered by reliability
+  const PROXIES = [
+    (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
+  ];
+
+  // Fetch with timeout helper
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const resp = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timer);
+      return resp;
+    } catch (e) {
+      clearTimeout(timer);
+      throw e;
+    }
+  }
+
+  // Strategy 1: YouTube Innertube Player API (most reliable)
+  async function fetchSubsInnertube(videoId) {
+    const body = {
+      context: {
+        client: {
+          clientName: 'WEB',
+          clientVersion: '2.20240101.00.00',
+          hl: 'ja',
+          gl: 'JP',
+        }
+      },
+      videoId: videoId
+    };
+
+    const innertubeUrl = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+
+    for (const makeProxy of PROXIES) {
+      try {
+        const resp = await fetchWithTimeout(makeProxy(innertubeUrl), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        if (!resp.ok) continue;
+        const data = await resp.json();
+
+        const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+        const track = pickTrack(tracks);
+        if (!track) continue;
+
+        // Fetch the subtitle XML
+        const subResp = await fetchWithTimeout(makeProxy(track.baseUrl));
+        if (!subResp.ok) continue;
+        const xml = await subResp.text();
+        const subs = parseSubtitleXml(xml);
+        if (subs && subs.length > 0) return subs;
+      } catch (e) {
+        console.warn('[Innertube] attempt failed:', e.message);
+      }
+    }
+    return null;
+  }
+
+  // Strategy 2: Parse YouTube watch page HTML
+  async function fetchSubsHtmlParse(videoId) {
+    for (const makeProxy of PROXIES) {
       try {
         const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const resp = await fetch(makeProxy(watchUrl));
+        const resp = await fetchWithTimeout(makeProxy(watchUrl));
         if (!resp.ok) continue;
         const html = await resp.text();
 
@@ -442,35 +522,73 @@
         if (!pr) continue;
 
         const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-        if (!tracks || tracks.length === 0) continue;
+        const track = pickTrack(tracks);
+        if (!track) continue;
 
-        let track = tracks.find(t => t.languageCode === 'ja')
-          || tracks.find(t => t.languageCode === 'en')
-          || tracks[0];
-
-        const subUrl = track.baseUrl;
-        const subResp = await fetch(makeProxy(subUrl));
+        const subResp = await fetchWithTimeout(makeProxy(track.baseUrl));
         if (!subResp.ok) continue;
         const xml = await subResp.text();
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xml, 'text/xml');
-        const texts = doc.querySelectorAll('text');
-
-        const subs = Array.from(texts).map(t => ({
-          start: parseFloat(t.getAttribute('start')),
-          duration: parseFloat(t.getAttribute('dur') || '2'),
-          text: decodeHtmlEntities(t.textContent)
-        }));
-
-        if (subs.length > 0) {
-          subtitleCache[videoId] = subs;
-          return subs;
-        }
+        const subs = parseSubtitleXml(xml);
+        if (subs && subs.length > 0) return subs;
       } catch (e) {
-        console.warn('Subtitle fetch attempt failed:', e);
+        console.warn('[HTMLParse] attempt failed:', e.message);
       }
     }
+    return null;
+  }
+
+  // Strategy 3: Direct timedtext API with common language codes
+  async function fetchSubsTimedText(videoId) {
+    const langs = ['ja', 'en', 'auto'];
+    for (const makeProxy of PROXIES) {
+      for (const lang of langs) {
+        try {
+          const ttUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=srv3`;
+          const resp = await fetchWithTimeout(makeProxy(ttUrl));
+          if (!resp.ok) continue;
+          const xml = await resp.text();
+          if (!xml || xml.length < 50) continue;
+          const subs = parseSubtitleXml(xml);
+          if (subs && subs.length > 0) return subs;
+        } catch (e) {
+          // silent
+        }
+      }
+    }
+    return null;
+  }
+
+  // Main fetch function — tries all strategies
+  async function fetchSubtitles(videoId) {
+    if (subtitleCache[videoId]) return subtitleCache[videoId];
+
+    console.log('[Subtitles] Fetching for', videoId);
+
+    // Try Strategy 1: Innertube API
+    let subs = await fetchSubsInnertube(videoId);
+    if (subs) {
+      console.log('[Subtitles] Got via Innertube API');
+      subtitleCache[videoId] = subs;
+      return subs;
+    }
+
+    // Try Strategy 2: HTML page parse
+    subs = await fetchSubsHtmlParse(videoId);
+    if (subs) {
+      console.log('[Subtitles] Got via HTML parse');
+      subtitleCache[videoId] = subs;
+      return subs;
+    }
+
+    // Try Strategy 3: Direct timedtext API
+    subs = await fetchSubsTimedText(videoId);
+    if (subs) {
+      console.log('[Subtitles] Got via timedtext API');
+      subtitleCache[videoId] = subs;
+      return subs;
+    }
+
+    console.warn('[Subtitles] All strategies failed for', videoId);
     return null;
   }
 
