@@ -325,20 +325,20 @@
         checkLoop(ct);
         updateSubtitleHighlight(ct);
       }
-    }, 250);
+    }, 100);
   }
 
   // ===== Loop =====
   function toggleLoop() {
-    if (!player || !player.getCurrentTime) return;
+    if (!player || !player.getDuration) return;
 
     if (loopState === 'idle') {
-      loopA = Math.floor(player.getCurrentTime());
+      loopA = player.getCurrentTime();
       loopState = 'a-set';
       updateLoopUI();
       showToast(`A点を設定: ${formatTime(loopA)}`);
     } else if (loopState === 'a-set') {
-      loopB = Math.floor(player.getCurrentTime());
+      loopB = player.getCurrentTime();
       if (loopB <= loopA) {
         showToast('B点はA点より後に設定してください');
         return;
@@ -499,7 +499,7 @@
       // Add bookmark with subtitle text as note
       entry.bookmarks.push({
         id: generateId(),
-        time: Math.floor(sub.start),
+        time: sub.start,
         duration: sub.duration,
         note: sub.text,
         createdAt: new Date().toISOString()
@@ -591,7 +591,7 @@
   function startBookmarkLoop(bookmark) {
     const startTime = bookmark.time;
     const duration = bookmark.duration || 3;
-    const endTime = startTime + Math.ceil(duration) + 1;
+    const endTime = startTime + duration;
 
     loopA = startTime;
     loopB = endTime;
