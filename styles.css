@@ -995,6 +995,7 @@ body::before {
   max-height: 280px;
   overflow-y: auto;
   transition: max-height var(--transition-slow);
+  overscroll-behavior: contain;
 }
 
 .subtitle-panel--collapsed .subtitle-panel__body {
