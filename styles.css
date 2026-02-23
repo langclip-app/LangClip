@@ -955,6 +955,7 @@ body::before {
   overflow: hidden;
   background: var(--bg-card);
   animation: slideUp 0.4s ease both;
+  overscroll-behavior: contain;
 }
 
 .subtitle-panel__toggle {

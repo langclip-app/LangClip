@@ -150,29 +150,63 @@ function parseSubtitles(xml) {
 
     if (fragments.length === 0) return [];
 
-    // Group fragments into sentences
-    const sentences = [];
-    let current = null;
-
+    // --- High Precision Sentence Splitting (Word-Stream Approach) ---
+    const allTokens = [];
     for (const frag of fragments) {
-        if (!current) {
-            current = { ...frag };
-        } else {
-            current.text += ' ' + frag.text;
-            current.duration = (frag.start + frag.duration) - current.start;
-        }
+        if (!frag.text) continue;
 
-        // Check if the current text ends a sentence
-        // Punctuation: . ! ? 。 ！ ？
-        if (/[.!?。！？]$/.test(frag.text.trim())) {
-            sentences.push(current);
-            current = null;
+        // Split text into tokens, keeping delimiters (punctuation and spaces)
+        const tokens = frag.text.split(/([.!?。！？\s]+)/).filter(t => t.length > 0);
+        const totalChars = frag.text.length || 1;
+        let charCursor = 0;
+
+        for (const token of tokens) {
+            const tokenStart = frag.start + (charCursor / totalChars) * frag.duration;
+            const tokenDuration = (token.length / totalChars) * frag.duration;
+
+            allTokens.push({
+                text: token,
+                start: tokenStart,
+                duration: tokenDuration
+            });
+            charCursor += token.length;
         }
     }
 
-    // Push the last one if it didn't end with punctuation
-    if (current) {
-        sentences.push(current);
+    const sentences = [];
+    let currentSentence = null;
+
+    for (const token of allTokens) {
+        if (!currentSentence) {
+            if (!token.text.trim()) continue; // Skip leading whitespace for a new sentence
+            currentSentence = {
+                start: token.start,
+                duration: token.duration,
+                text: token.text
+            };
+        } else {
+            currentSentence.text += token.text;
+            currentSentence.duration = (token.start + token.duration) - currentSentence.start;
+        }
+
+        // Split at punctuation: . ! ? 。 ！ ？
+        if (/[.!?。！？]/.test(token.text)) {
+            sentences.push({
+                start: currentSentence.start,
+                duration: currentSentence.duration,
+                text: currentSentence.text.trim()
+            });
+            currentSentence = null;
+        }
+    }
+
+    // Push an incomplete sentence if it remains
+    if (currentSentence && currentSentence.text.trim()) {
+        sentences.push({
+            start: currentSentence.start,
+            duration: currentSentence.duration,
+            text: currentSentence.text.trim()
+        });
     }
 
     return sentences;

@@ -532,7 +532,19 @@
       const isActive = i === activeIndex;
       line.classList.toggle('subtitle-line--active', isActive);
       if (isActive && !subtitlePanel.classList.contains('subtitle-panel--collapsed')) {
-        line.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        const body = subtitlePanel.querySelector('.subtitle-panel__body');
+        if (body) {
+          const lineTop = line.offsetTop;
+          const lineBottom = lineTop + line.offsetHeight;
+          const bodyTop = body.scrollTop;
+          const bodyBottom = bodyTop + body.offsetHeight;
+
+          if (lineTop < bodyTop) {
+            body.scrollTo({ top: lineTop, behavior: 'smooth' });
+          } else if (lineBottom > bodyBottom) {
+            body.scrollTo({ top: lineBottom - body.offsetHeight, behavior: 'smooth' });
+          }
+        }
       }
     });
   }
