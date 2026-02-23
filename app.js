@@ -25,13 +25,16 @@
   let currentUser = null;
   let isFirebaseConfigured = false;
 
+  // Speed state
+  const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  let currentSpeedIndex = 2; // default 1x
+
   // ===== DOM Elements =====
   const $ = (sel) => document.querySelector(sel);
   const videoUrlInput = $('#videoUrlInput');
   const loadVideoBtn = $('#loadVideoBtn');
   const playerSection = $('#playerSection');
   const bookmarksSection = $('#bookmarksSection');
-  const addBookmarkBtn = $('#addBookmarkBtn');
   const currentTimeDisplay = $('#currentTime');
   const bookmarksList = $('#bookmarksList');
   const bookmarkCount = $('#bookmarkCount');
@@ -59,6 +62,10 @@
   const loopIndicator = $('#loopIndicator');
   const loopRange = $('#loopRange');
   const loopClear = $('#loopClear');
+
+  // Speed elements
+  const speedBtn = $('#speedBtn');
+  const speedLabel = $('#speedLabel');
 
   // Subtitle elements
   const subtitlePanel = $('#subtitlePanel');
@@ -374,6 +381,22 @@
     }
   }
 
+  // ===== Speed Control =====
+  function cycleSpeed() {
+    currentSpeedIndex = (currentSpeedIndex + 1) % SPEED_OPTIONS.length;
+    const speed = SPEED_OPTIONS[currentSpeedIndex];
+    if (player && player.setPlaybackRate) {
+      player.setPlaybackRate(speed);
+    }
+    updateSpeedUI();
+  }
+
+  function updateSpeedUI() {
+    const speed = SPEED_OPTIONS[currentSpeedIndex];
+    speedLabel.textContent = speed === 1 ? '1x' : speed + 'x';
+    speedBtn.classList.toggle('btn-speed--active', speed !== 1);
+  }
+
   // ===== Subtitles =====
   function extractJSON(html, marker) {
     const idx = html.indexOf(marker);
@@ -474,13 +497,68 @@
     }
   }
 
+  function isSubtitleBookmarked(subIndex) {
+    if (!subtitles || !subtitles[subIndex]) return false;
+    const entry = getCurrentVideoEntry();
+    if (!entry) return false;
+    const sub = subtitles[subIndex];
+    return entry.bookmarks.some(b => Math.abs(b.time - Math.floor(sub.start)) < 1);
+  }
+
+  function getBookmarkForSubtitle(subIndex) {
+    if (!subtitles || !subtitles[subIndex]) return null;
+    const entry = getCurrentVideoEntry();
+    if (!entry) return null;
+    const sub = subtitles[subIndex];
+    return entry.bookmarks.find(b => Math.abs(b.time - Math.floor(sub.start)) < 1);
+  }
+
   function renderSubtitles() {
-    subtitleList.innerHTML = subtitles.map((s, i) => `
-      <div class="subtitle-line" data-index="${i}" data-start="${s.start}">
-        <span class="subtitle-line__time">${formatTime(s.start)}</span>
-        <span class="subtitle-line__text">${escapeHtml(s.text)}</span>
-      </div>
-    `).join('');
+    const bookmarkIcon = `<svg class="subtitle-line__bookmark-icon" width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M10 3L12.09 7.26L16.82 7.94L13.41 11.27L14.18 15.97L10 13.77L5.82 15.97L6.59 11.27L3.18 7.94L7.91 7.26L10 3Z" stroke="currentColor" stroke-width="1.5" fill="currentColor" fill-opacity="0.15" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+    subtitleList.innerHTML = subtitles.map((s, i) => {
+      const isBookmarked = isSubtitleBookmarked(i);
+      return `
+        <div class="subtitle-line ${isBookmarked ? 'subtitle-line--bookmarked' : ''}" data-index="${i}" data-start="${s.start}" data-duration="${s.duration}">
+          <span class="subtitle-line__time">${formatTime(s.start)}</span>
+          <span class="subtitle-line__text">${escapeHtml(s.text)}</span>
+          ${bookmarkIcon}
+        </div>
+      `;
+    }).join('');
+  }
+
+  function toggleSubtitleBookmark(subIndex) {
+    if (!subtitles || !subtitles[subIndex]) return;
+    const sub = subtitles[subIndex];
+    const entry = getCurrentVideoEntry();
+    if (!entry) return;
+
+    const existing = getBookmarkForSubtitle(subIndex);
+    if (existing) {
+      // Remove bookmark
+      entry.bookmarks = entry.bookmarks.filter(b => b.id !== existing.id);
+      saveState();
+      renderBookmarks();
+      renderSubtitles();
+      renderLibrary();
+      showToast('ブックマークを解除しました');
+    } else {
+      // Add bookmark with subtitle text as note
+      entry.bookmarks.push({
+        id: generateId(),
+        time: Math.floor(sub.start),
+        duration: sub.duration,
+        note: sub.text,
+        createdAt: new Date().toISOString()
+      });
+      entry.bookmarks.sort((a, b) => a.time - b.time);
+      saveState();
+      renderBookmarks();
+      renderSubtitles();
+      renderLibrary();
+      showToast('ブックマークに追加しました');
+    }
   }
 
   function updateSubtitleHighlight(currentTime) {
@@ -512,29 +590,18 @@
     return state.videos.find(v => v.videoId === currentVideoId);
   }
 
-  function addBookmark(time, note) {
-    const entry = getCurrentVideoEntry();
-    if (!entry) return;
-    entry.bookmarks.push({
-      id: generateId(),
-      time: Math.floor(time),
-      note: note || '',
-      createdAt: new Date().toISOString()
-    });
-    entry.bookmarks.sort((a, b) => a.time - b.time);
-    saveState();
-    renderBookmarks();
-    renderLibrary();
-    showToast('ブックマークを追加しました');
-  }
-
   function deleteBookmark(bookmarkId) {
     const entry = getCurrentVideoEntry();
     if (!entry) return;
     entry.bookmarks = entry.bookmarks.filter(b => b.id !== bookmarkId);
     saveState();
     renderBookmarks();
+    renderSubtitles();
     renderLibrary();
+    // Clear loop if the deleted bookmark was being looped
+    if (loopState === 'looping') {
+      clearLoop();
+    }
     showToast('ブックマークを削除しました');
   }
 
@@ -555,6 +622,25 @@
       player.seekTo(time, true);
       player.playVideo();
     }
+  }
+
+  function startBookmarkLoop(bookmark) {
+    const startTime = bookmark.time;
+    const duration = bookmark.duration || 3;
+    const endTime = startTime + Math.ceil(duration) + 1;
+
+    loopA = startTime;
+    loopB = endTime;
+    loopState = 'looping';
+    updateLoopUI();
+
+    // Highlight active bookmark card
+    document.querySelectorAll('.bookmark-card').forEach(card => {
+      card.classList.toggle('bookmark-card--loop-active', card.dataset.id === bookmark.id);
+    });
+
+    seekTo(startTime);
+    showToast(`ループ再生: ${formatTime(startTime)} → ${formatTime(endTime)}`);
   }
 
   // ===== Rendering =====
@@ -578,10 +664,10 @@
 
     bookmarksEmpty.style.display = 'none';
     bookmarksList.innerHTML = bookmarks.map((b, i) => `
-      <div class="bookmark-card" data-id="${b.id}" data-time="${b.time}" style="animation-delay: ${i * 50}ms">
+      <div class="bookmark-card" data-id="${b.id}" data-time="${b.time}" data-duration="${b.duration || 3}" style="animation-delay: ${i * 50}ms">
         <div class="bookmark-card__time">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M8 4L10 8.5L8 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <svg width="14" height="14" viewBox="0 0 18 18" fill="none">
+            <path d="M2.5 9A6.5 6.5 0 0115.36 5.5M15.5 9A6.5 6.5 0 012.64 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
           ${formatTime(b.time)}
         </div>
@@ -659,13 +745,13 @@
   }
 
   // ===== Modal Helpers =====
-  function openBookmarkModal() {
+  function openBookmarkModal(time, prefillNote) {
     if (!player || !player.getCurrentTime) return;
-    const time = player.getCurrentTime();
-    modalTime.textContent = formatTime(time);
-    bookmarkNote.value = '';
+    const t = time !== undefined ? time : player.getCurrentTime();
+    modalTime.textContent = formatTime(t);
+    bookmarkNote.value = prefillNote || '';
     bookmarkModal.classList.add('active');
-    bookmarkModal.dataset.time = Math.floor(time);
+    bookmarkModal.dataset.time = Math.floor(t);
     setTimeout(() => bookmarkNote.focus(), 300);
   }
 
@@ -719,13 +805,26 @@
     }, 100);
   });
 
-  // Bookmark
-  addBookmarkBtn.addEventListener('click', openBookmarkModal);
+  // Bookmark modal
   modalClose.addEventListener('click', closeBookmarkModal);
   modalCancel.addEventListener('click', closeBookmarkModal);
   modalSave.addEventListener('click', () => {
     const time = parseInt(bookmarkModal.dataset.time, 10);
-    addBookmark(time, bookmarkNote.value.trim());
+    const entry = getCurrentVideoEntry();
+    if (entry) {
+      entry.bookmarks.push({
+        id: generateId(),
+        time: time,
+        note: bookmarkNote.value.trim(),
+        createdAt: new Date().toISOString()
+      });
+      entry.bookmarks.sort((a, b) => a.time - b.time);
+      saveState();
+      renderBookmarks();
+      renderSubtitles();
+      renderLibrary();
+      showToast('ブックマークを追加しました');
+    }
     closeBookmarkModal();
   });
   bookmarkModal.addEventListener('click', (e) => {
@@ -745,7 +844,7 @@
     if (e.target === editModal) closeEditModal();
   });
 
-  // Bookmark list delegation
+  // Bookmark list delegation — clicking a bookmark starts a loop
   bookmarksList.addEventListener('click', (e) => {
     const actionBtn = e.target.closest('[data-action]');
     if (actionBtn) {
@@ -757,7 +856,15 @@
       return;
     }
     const card = e.target.closest('.bookmark-card');
-    if (card) seekTo(parseInt(card.dataset.time, 10));
+    if (card) {
+      const entry = getCurrentVideoEntry();
+      if (entry) {
+        const bookmark = entry.bookmarks.find(b => b.id === card.dataset.id);
+        if (bookmark) {
+          startBookmarkLoop(bookmark);
+        }
+      }
+    }
   });
 
   // Library delegation
@@ -801,14 +908,17 @@
     subtitlePanel.classList.toggle('subtitle-panel--collapsed');
   });
 
-  // Subtitle line click
+  // Subtitle line click — toggle bookmark
   subtitleList.addEventListener('click', (e) => {
     const line = e.target.closest('.subtitle-line');
     if (line) {
-      const start = parseFloat(line.dataset.start);
-      seekTo(start);
+      const index = parseInt(line.dataset.index, 10);
+      toggleSubtitleBookmark(index);
     }
   });
+
+  // Speed control
+  speedBtn.addEventListener('click', cycleSpeed);
 
   // Auth
   googleLoginBtn.addEventListener('click', googleLogin);
@@ -819,10 +929,6 @@
     if (e.key === 'Escape') {
       closeBookmarkModal();
       closeEditModal();
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'b' && currentVideoId) {
-      e.preventDefault();
-      openBookmarkModal();
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'l' && currentVideoId) {
       e.preventDefault();

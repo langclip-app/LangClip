@@ -1103,4 +1103,94 @@ body::before {
   .btn-loop {
     padding: 10px 12px;
   }
+
+  .btn-speed span {
+    display: none;
+  }
+
+  .btn-speed {
+    padding: 10px 12px;
+  }
+}
+
+/* ===== Speed Button ===== */
+.btn-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--bg-glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+  white-space: nowrap;
+}
+
+.btn-speed:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent-end);
+}
+
+.btn-speed svg {
+  color: var(--text-tertiary);
+  transition: color var(--transition-normal);
+}
+
+.btn-speed--active {
+  border-color: var(--accent-end);
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.btn-speed--active svg {
+  color: var(--accent-end);
+}
+
+/* ===== Subtitle Line Bookmark States ===== */
+.subtitle-line {
+  position: relative;
+}
+
+.subtitle-line__bookmark-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: all var(--transition-fast);
+  margin-left: auto;
+}
+
+.subtitle-line:hover .subtitle-line__bookmark-icon {
+  opacity: 0.5;
+}
+
+.subtitle-line--bookmarked .subtitle-line__bookmark-icon {
+  opacity: 1;
+  color: var(--accent-start);
+}
+
+.subtitle-line--bookmarked {
+  background: rgba(167, 139, 250, 0.06);
+}
+
+.subtitle-line--bookmarked .subtitle-line__text {
+  color: var(--text-primary);
+}
+
+/* ===== Bookmark Card Loop Active ===== */
+.bookmark-card--loop-active {
+  border-color: var(--accent-start);
+  background: rgba(167, 139, 250, 0.08);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.12);
+}
+
+.bookmark-card--loop-active .bookmark-card__time {
+  background: rgba(167, 139, 250, 0.2);
 }
