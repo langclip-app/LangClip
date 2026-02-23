@@ -431,29 +431,36 @@
       || tracks[0];
   }
 
-  // Parse subtitle XML into array
+  // Parse subtitle XML into array — with validation
   function parseSubtitleXml(xml) {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, 'text/xml');
-    const texts = doc.querySelectorAll('text');
-    if (!texts || texts.length === 0) return null;
-    return Array.from(texts).map(t => ({
-      start: parseFloat(t.getAttribute('start')),
-      duration: parseFloat(t.getAttribute('dur') || '2'),
-      text: decodeHtmlEntities(t.textContent)
-    }));
+    if (!xml || xml.length < 30) return null;
+    // Reject captcha/error pages
+    if (xml.includes('<html') || xml.includes('Sorry') || xml.includes('<!DOCTYPE')) return null;
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, 'text/xml');
+      const texts = doc.querySelectorAll('text');
+      if (!texts || texts.length === 0) return null;
+      return Array.from(texts).map(t => ({
+        start: parseFloat(t.getAttribute('start')),
+        duration: parseFloat(t.getAttribute('dur') || '2'),
+        text: decodeHtmlEntities(t.textContent)
+      }));
+    } catch {
+      return null;
+    }
   }
 
-  // CORS proxy list — ordered by reliability
+  // CORS proxy list — codetabs is first because it's the most reliable for returning captionTracks
   const PROXIES = [
+    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
     (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
     (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
     (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
   ];
 
   // Fetch with timeout helper
-  async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -466,124 +473,77 @@
     }
   }
 
-  // Strategy 1: YouTube Innertube Player API (most reliable)
-  async function fetchSubsInnertube(videoId) {
-    const body = {
-      context: {
-        client: {
-          clientName: 'WEB',
-          clientVersion: '2.20240101.00.00',
-          hl: 'ja',
-          gl: 'JP',
-        }
-      },
-      videoId: videoId
-    };
+  // Try to get subtitle XML from a baseUrl using any available proxy
+  async function fetchSubtitleXml(baseUrl, preferredProxy) {
+    // Try the preferred proxy first (same IP as the one that got the track URL)
+    const proxyOrder = preferredProxy
+      ? [preferredProxy, ...PROXIES.filter(p => p !== preferredProxy)]
+      : PROXIES;
 
-    const innertubeUrl = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
-
-    for (const makeProxy of PROXIES) {
+    for (const makeProxy of proxyOrder) {
       try {
-        const resp = await fetchWithTimeout(makeProxy(innertubeUrl), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
+        const resp = await fetchWithTimeout(makeProxy(baseUrl), {}, 10000);
         if (!resp.ok) continue;
-        const data = await resp.json();
-
-        const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-        const track = pickTrack(tracks);
-        if (!track) continue;
-
-        // Fetch the subtitle XML
-        const subResp = await fetchWithTimeout(makeProxy(track.baseUrl));
-        if (!subResp.ok) continue;
-        const xml = await subResp.text();
+        const xml = await resp.text();
         const subs = parseSubtitleXml(xml);
         if (subs && subs.length > 0) return subs;
-      } catch (e) {
-        console.warn('[Innertube] attempt failed:', e.message);
+      } catch {
+        // continue to next proxy
       }
     }
     return null;
   }
 
-  // Strategy 2: Parse YouTube watch page HTML
-  async function fetchSubsHtmlParse(videoId) {
-    for (const makeProxy of PROXIES) {
-      try {
-        const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const resp = await fetchWithTimeout(makeProxy(watchUrl));
-        if (!resp.ok) continue;
-        const html = await resp.text();
+  // Single proxy attempt: fetch page HTML → extract tracks → fetch subtitle XML
+  async function tryProxyForSubs(videoId, makeProxy) {
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const resp = await fetchWithTimeout(makeProxy(watchUrl));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const html = await resp.text();
 
-        const pr = extractJSON(html, 'ytInitialPlayerResponse');
-        if (!pr) continue;
+    const pr = extractJSON(html, 'ytInitialPlayerResponse');
+    if (!pr) throw new Error('No ytInitialPlayerResponse');
 
-        const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-        const track = pickTrack(tracks);
-        if (!track) continue;
+    const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    const track = pickTrack(tracks);
+    if (!track) throw new Error('No captionTracks found');
 
-        const subResp = await fetchWithTimeout(makeProxy(track.baseUrl));
-        if (!subResp.ok) continue;
-        const xml = await subResp.text();
-        const subs = parseSubtitleXml(xml);
-        if (subs && subs.length > 0) return subs;
-      } catch (e) {
-        console.warn('[HTMLParse] attempt failed:', e.message);
-      }
+    console.log(`[Subtitles] Found track: ${track.languageCode} via ${makeProxy('TEST').split('/')[2]}`);
+
+    // Try fetching XML — prefer same proxy, then try others
+    const subs = await fetchSubtitleXml(track.baseUrl, makeProxy);
+    if (subs && subs.length > 0) return subs;
+    throw new Error('XML fetch failed across all proxies');
+  }
+
+  // Race all proxies in parallel — first valid result wins
+  async function fetchSubtitlesParallel(videoId) {
+    const results = PROXIES.map(makeProxy =>
+      tryProxyForSubs(videoId, makeProxy)
+        .catch(e => {
+          console.warn(`[Subtitles] Proxy failed:`, e.message);
+          return null;
+        })
+    );
+
+    // Use Promise.any-like behavior: return first non-null result
+    for (const promise of results) {
+      const result = await promise;
+      if (result) return result;
     }
     return null;
   }
 
-  // Strategy 3: Direct timedtext API with common language codes
-  async function fetchSubsTimedText(videoId) {
-    const langs = ['ja', 'en', 'auto'];
-    for (const makeProxy of PROXIES) {
-      for (const lang of langs) {
-        try {
-          const ttUrl = `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=srv3`;
-          const resp = await fetchWithTimeout(makeProxy(ttUrl));
-          if (!resp.ok) continue;
-          const xml = await resp.text();
-          if (!xml || xml.length < 50) continue;
-          const subs = parseSubtitleXml(xml);
-          if (subs && subs.length > 0) return subs;
-        } catch (e) {
-          // silent
-        }
-      }
-    }
-    return null;
-  }
-
-  // Main fetch function — tries all strategies
+  // Main fetch function
   async function fetchSubtitles(videoId) {
     if (subtitleCache[videoId]) return subtitleCache[videoId];
 
     console.log('[Subtitles] Fetching for', videoId);
 
-    // Try Strategy 1: Innertube API
-    let subs = await fetchSubsInnertube(videoId);
+    // Race all proxies in parallel
+    const subs = await fetchSubtitlesParallel(videoId);
     if (subs) {
-      console.log('[Subtitles] Got via Innertube API');
-      subtitleCache[videoId] = subs;
-      return subs;
-    }
-
-    // Try Strategy 2: HTML page parse
-    subs = await fetchSubsHtmlParse(videoId);
-    if (subs) {
-      console.log('[Subtitles] Got via HTML parse');
-      subtitleCache[videoId] = subs;
-      return subs;
-    }
-
-    // Try Strategy 3: Direct timedtext API
-    subs = await fetchSubsTimedText(videoId);
-    if (subs) {
-      console.log('[Subtitles] Got via timedtext API');
+      console.log(`[Subtitles] Success! Got ${subs.length} lines`);
       subtitleCache[videoId] = subs;
       return subs;
     }
