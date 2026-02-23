@@ -20,6 +20,7 @@
   let subtitles = null;
   let subtitleCache = {};
   let lastActiveSubIdx = -1;
+  const SUBTITLE_PROXY_URL = 'https://langclip-subtitles.syun-ohsaka.workers.dev';
 
   // Firebase state
   let currentUser = null;
@@ -398,157 +399,30 @@
   }
 
   // ===== Subtitles =====
-  function extractJSON(html, marker) {
-    const idx = html.indexOf(marker);
-    if (idx === -1) return null;
-    let start = html.indexOf('{', idx);
-    if (start === -1) return null;
-    let depth = 0;
-    for (let i = start; i < html.length && i < start + 500000; i++) {
-      if (html[i] === '{') depth++;
-      else if (html[i] === '}') {
-        depth--;
-        if (depth === 0) {
-          try { return JSON.parse(html.substring(start, i + 1)); }
-          catch { return null; }
-        }
-      }
-    }
-    return null;
-  }
-
   function decodeHtmlEntities(text) {
     const ta = document.createElement('textarea');
     ta.innerHTML = text;
     return ta.value;
   }
 
-  // Pick best caption track (prefer ja > en > first available)
-  function pickTrack(tracks) {
-    if (!tracks || tracks.length === 0) return null;
-    return tracks.find(t => t.languageCode === 'ja')
-      || tracks.find(t => t.languageCode === 'en')
-      || tracks[0];
-  }
-
-  // Parse subtitle XML into array — with validation
-  function parseSubtitleXml(xml) {
-    if (!xml || xml.length < 30) return null;
-    // Reject captcha/error pages
-    if (xml.includes('<html') || xml.includes('Sorry') || xml.includes('<!DOCTYPE')) return null;
-    try {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(xml, 'text/xml');
-      const texts = doc.querySelectorAll('text');
-      if (!texts || texts.length === 0) return null;
-      return Array.from(texts).map(t => ({
-        start: parseFloat(t.getAttribute('start')),
-        duration: parseFloat(t.getAttribute('dur') || '2'),
-        text: decodeHtmlEntities(t.textContent)
-      }));
-    } catch {
-      return null;
-    }
-  }
-
-  // CORS proxy list — codetabs is first because it's the most reliable for returning captionTracks
-  const PROXIES = [
-    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-    (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
-  ];
-
-  // Fetch with timeout helper
-  async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const resp = await fetch(url, { ...options, signal: controller.signal });
-      clearTimeout(timer);
-      return resp;
-    } catch (e) {
-      clearTimeout(timer);
-      throw e;
-    }
-  }
-
-  // Try to get subtitle XML from a baseUrl using any available proxy
-  async function fetchSubtitleXml(baseUrl, preferredProxy) {
-    // Try the preferred proxy first (same IP as the one that got the track URL)
-    const proxyOrder = preferredProxy
-      ? [preferredProxy, ...PROXIES.filter(p => p !== preferredProxy)]
-      : PROXIES;
-
-    for (const makeProxy of proxyOrder) {
-      try {
-        const resp = await fetchWithTimeout(makeProxy(baseUrl), {}, 10000);
-        if (!resp.ok) continue;
-        const xml = await resp.text();
-        const subs = parseSubtitleXml(xml);
-        if (subs && subs.length > 0) return subs;
-      } catch {
-        // continue to next proxy
-      }
-    }
-    return null;
-  }
-
-  // Single proxy attempt: fetch page HTML → extract tracks → fetch subtitle XML
-  async function tryProxyForSubs(videoId, makeProxy) {
-    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const resp = await fetchWithTimeout(makeProxy(watchUrl));
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const html = await resp.text();
-
-    const pr = extractJSON(html, 'ytInitialPlayerResponse');
-    if (!pr) throw new Error('No ytInitialPlayerResponse');
-
-    const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    const track = pickTrack(tracks);
-    if (!track) throw new Error('No captionTracks found');
-
-    console.log(`[Subtitles] Found track: ${track.languageCode} via ${makeProxy('TEST').split('/')[2]}`);
-
-    // Try fetching XML — prefer same proxy, then try others
-    const subs = await fetchSubtitleXml(track.baseUrl, makeProxy);
-    if (subs && subs.length > 0) return subs;
-    throw new Error('XML fetch failed across all proxies');
-  }
-
-  // Race all proxies in parallel — first valid result wins
-  async function fetchSubtitlesParallel(videoId) {
-    const results = PROXIES.map(makeProxy =>
-      tryProxyForSubs(videoId, makeProxy)
-        .catch(e => {
-          console.warn(`[Subtitles] Proxy failed:`, e.message);
-          return null;
-        })
-    );
-
-    // Use Promise.any-like behavior: return first non-null result
-    for (const promise of results) {
-      const result = await promise;
-      if (result) return result;
-    }
-    return null;
-  }
-
-  // Main fetch function
   async function fetchSubtitles(videoId) {
     if (subtitleCache[videoId]) return subtitleCache[videoId];
 
-    console.log('[Subtitles] Fetching for', videoId);
+    console.log('[Subtitles] Fetching via proxy for', videoId);
+    try {
+      const resp = await fetch(`${SUBTITLE_PROXY_URL}?v=${videoId}`);
+      if (!resp.ok) throw new Error(`Proxy returned ${resp.status}`);
 
-    // Race all proxies in parallel
-    const subs = await fetchSubtitlesParallel(videoId);
-    if (subs) {
-      console.log(`[Subtitles] Success! Got ${subs.length} lines`);
-      subtitleCache[videoId] = subs;
-      return subs;
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+
+      if (data.subtitles && data.subtitles.length > 0) {
+        subtitleCache[videoId] = data.subtitles;
+        return data.subtitles;
+      }
+    } catch (e) {
+      console.error('[Subtitles] Fetch failed:', e.message);
     }
-
-    console.warn('[Subtitles] All strategies failed for', videoId);
     return null;
   }
 
