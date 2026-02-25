@@ -509,6 +509,7 @@
       renderBookmarks();
       renderSubtitles();
       renderLibrary();
+      seekTo(Math.max(0, sub.start - 1.0));
       showToast('ブックマークに追加しました');
     }
   }
